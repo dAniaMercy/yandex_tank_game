@@ -176,6 +176,19 @@ class MainGameMenu:
         self.MapHeight -= 1
 
 
+class Bullet:
+    def __init__(self, x, y, dx, dy):
+        self.x = x
+        self.y = y
+        self.dx = dx
+        self.dy = dy
+        self.speed = 0.01
+
+    def move(self):
+        self.x += self.dx * self.speed
+        self.y += self.dy * self.speed
+
+
 class MainGame:
     def __init__(self, game, settings, MapHeight, MapWidth, CountEnemy):
         self.mainText = pygame.font.Font('ttf/pixel.ttf', 72)
@@ -186,6 +199,15 @@ class MainGame:
         self.CountEnemy = CountEnemy
         self.Map = self.GenerateMap()
         self.TileSize = 128 * self.settings.WinRatio
+
+        self.player_x, self.player_y = 1, 1
+        self.player_dx, self.player_dy = 0, -1
+        self.bullets = []
+        self.enemy_positions = [(x, y) for x in range(self.MapWidth) for y in range(self.MapHeight) if
+                                self.Map[x][y] == 3]
+        self.last_shot_time = pygame.time.get_ticks()
+        self.last_enemy_move_time = pygame.time.get_ticks()
+        self.last_enemy_shot_time = pygame.time.get_ticks()
 
         self.wall_sprite = pygame.image.load("sprites/wall.png")
         self.wall_sprite = pygame.transform.scale(self.wall_sprite, (self.TileSize, self.TileSize))
@@ -247,6 +269,23 @@ class MainGame:
 
             self.tank_sprite = self.rotate_player_sprite()
 
+    def move_enemies(self):
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_enemy_move_time >= 2000:
+            self.last_enemy_move_time = current_time
+            new_positions = []
+            for x, y in self.enemy_positions:
+                dx = 1 if self.player_x > x else -1 if self.player_x < x else 0
+                dy = 1 if self.player_y > y else -1 if self.player_y < y else 0
+                new_x, new_y = x + dx, y + dy
+                if 0 <= new_x < self.MapWidth and 0 <= new_y < self.MapHeight and self.Map[new_x][new_y] == 0:
+                    self.Map[x][y] = 0
+                    self.Map[new_x][new_y] = 3
+                    new_positions.append((new_x, new_y))
+                else:
+                    new_positions.append((x, y))
+            self.enemy_positions = new_positions
+
     def Draw(self):
         self.game.fill((0, 0, 0))
 
@@ -298,16 +337,32 @@ class MainGame:
 
         return all((ex, ey) in visited for ex, ey in enemy_positions)
 
-    def Main(self):
-        self.game.fill((0, 0, 0))
-        print(self.DrawInConsole())
+    def shoot(self):
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_shot_time >= 3000:
+            self.last_shot_time = current_time
+            self.bullets.append(Bullet(self.player_x, self.player_y, self.player_dx, self.player_dy))
 
+    def enemy_shoot(self):
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_enemy_shot_time >= 3000:
+            self.last_enemy_shot_time = current_time
+            for x, y in self.enemy_positions:
+                dx = 1 if self.player_x > x else -1 if self.player_x < x else 0
+                dy = 1 if self.player_y > y else -1 if self.player_y < y else 0
+                if dx != 0 or dy != 0:
+                    self.bullets.append(Bullet(x, y, dx, dy))
+
+    def update_bullets(self):
+        for bullet in self.bullets:
+            bullet.move()
+
+    def Main(self):
         running = True
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_w:
                         self.move_player(0, -1)
@@ -317,9 +372,12 @@ class MainGame:
                         self.move_player(-1, 0)
                     elif event.key == pygame.K_d:
                         self.move_player(1, 0)
-
+                    elif event.key == pygame.K_SPACE:
+                        self.shoot()
             self.Draw()
-
+            self.move_enemies()
+            self.enemy_shoot()
+            self.update_bullets()
         pygame.quit()
 
 
