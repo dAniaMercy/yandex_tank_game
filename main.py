@@ -176,6 +176,24 @@ class MainGameMenu:
         self.MapHeight -= 1
 
 
+class Bullet:
+    def __init__(self, x, y, dx, dy):
+        self.x = x
+        self.y = y
+        self.dx = dx
+        self.dy = dy
+        self.speed = 0.05
+
+    def move(self):
+        self.x += self.dx * self.speed
+        self.y += self.dy * self.speed
+
+class Enemy:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
 class MainGame:
     def __init__(self, game, settings, MapHeight, MapWidth, CountEnemy):
         self.mainText = pygame.font.Font('ttf/pixel.ttf', 72)
@@ -187,16 +205,81 @@ class MainGame:
         self.Map = self.GenerateMap()
         self.TileSize = 128 * self.settings.WinRatio
 
+        self.enemies = []  # Список врагов
+        self.load_enemies(CountEnemy)
+
+        self.player_x, self.player_y = 1, 1
+        self.player_dx, self.player_dy = 0, -1
+        self.bullets = []
+        self.enemy_positions = [(x, y) for x in range(self.MapWidth) for y in range(self.MapHeight) if
+                                self.Map[x][y] == 3]
+        self.last_shot_time = pygame.time.get_ticks()
+        self.last_enemy_move_time = pygame.time.get_ticks()
+        self.last_enemy_shot_time = pygame.time.get_ticks()
+
         self.wall_sprite = pygame.image.load("sprites/wall.png")
         self.wall_sprite = pygame.transform.scale(self.wall_sprite, (self.TileSize, self.TileSize))
 
         self.tank_sprite_original = pygame.image.load("sprites/tank.png")
-        self.tank_sprite_original = pygame.transform.scale(self.tank_sprite_original,
-                                                           (self.TileSize, self.TileSize))
+        self.tank_sprite_original = pygame.transform.scale(self.tank_sprite_original, (self.TileSize, self.TileSize))
+
+        self.tank_enemy_sprite_original = pygame.image.load("sprites/enemy.png")
+        self.tank_enemy_sprite_original = pygame.transform.scale(self.tank_enemy_sprite_original,
+                                                                 (self.TileSize, self.TileSize))
+
+        self.bullet_sprite = pygame.image.load("sprites/bullet.png")
+        self.bullet_sprite = pygame.transform.scale(self.bullet_sprite, (self.TileSize // 4, self.TileSize // 4))
 
         self.player_x, self.player_y = 1, 1
-        self.player_angle = 0  # Изначально смотрит вверх
+        self.player_angle = 0
         self.tank_sprite = self.rotate_player_sprite()
+        self.tank_enemy_sprite = self.rotate_enemy_sprite()
+
+    def is_hit(self, bullet, target_x, target_y):
+        """Проверяет, попала ли пуля в цель (игрока или врага)."""
+        return int(bullet.x) == target_x and int(bullet.y) == target_y
+
+    def update(self):
+        """Обновляет позиции пуль и проверяет попадания."""
+        for bullet in self.bullets[:]:
+            bullet.move()
+
+            # Проверка попадания в игрока
+            if self.is_hit(bullet, self.player_x, self.player_y):
+                print("💀 Игрок уничтожен!")
+                pygame.quit()
+                exit()
+
+            # Проверка попадания в врагов
+            for enemy in self.enemies[:]:
+                if self.is_hit(bullet, enemy.x, enemy.y):
+                    print("💥 Враг уничтожен!")
+                    self.enemies.remove(enemy)
+                    self.bullets.remove(bullet)
+                    break  # Выходим, так как пуля исчезла
+
+    def Draw(self):
+        self.game.fill((0, 0, 0))
+
+        for x in range(self.MapWidth):
+            for y in range(self.MapHeight):
+                screen_x, screen_y = x * self.TileSize, y * self.TileSize
+                if self.Map[x][y] == 1:
+                    self.game.blit(self.wall_sprite, (screen_x, screen_y))
+                elif self.Map[x][y] == 2:
+                    self.game.blit(self.tank_sprite, (screen_x, screen_y))
+
+        # Отрисовка врагов
+        for enemy in self.enemies:
+            enemy_x, enemy_y = enemy.x * self.TileSize, enemy.y * self.TileSize
+            self.game.blit(self.tank_enemy_sprite_original, (enemy_x, enemy_y))
+
+        # Отрисовка пуль
+        for bullet in self.bullets:
+            bullet_x, bullet_y = bullet.x * self.TileSize, bullet.y * self.TileSize
+            self.game.blit(self.bullet_sprite, (bullet_x, bullet_y))
+
+        pygame.display.flip()
 
     def GenerateMap(self):
         Map = [[0 for _ in range(self.MapHeight)] for _ in range(self.MapWidth)]
@@ -229,6 +312,15 @@ class MainGame:
     def rotate_player_sprite(self):
         return pygame.transform.rotate(self.tank_sprite_original, self.player_angle)
 
+    def load_enemies(self, count):
+        """Создает врагов в случайных местах."""
+        for _ in range(count):
+            x, y = random.randint(0, self.MapWidth - 1), random.randint(0, self.MapHeight - 1)
+            self.enemies.append(Enemy(x, y))
+
+    def rotate_enemy_sprite(self):
+        return pygame.transform.rotate(self.tank_enemy_sprite_original, self.player_angle)
+
     def move_player(self, dx, dy):
         new_x, new_y = self.player_x + dx, self.player_y + dy
         if 0 <= new_x < self.MapWidth and 0 <= new_y < self.MapHeight and self.Map[new_x][new_y] != 1:
@@ -247,7 +339,25 @@ class MainGame:
 
             self.tank_sprite = self.rotate_player_sprite()
 
-    def Draw(self):
+    def move_enemies(self):
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_enemy_move_time >= 2000:
+            self.last_enemy_move_time = current_time
+            new_positions = []
+            for x, y in self.enemy_positions:
+                dx = 1 if self.player_x > x else -1 if self.player_x < x else 0
+                dy = 1 if self.player_y > y else -1 if self.player_y < y else 0
+                new_x, new_y = x + dx, y + dy
+                if 0 <= new_x < self.MapWidth and 0 <= new_y < self.MapHeight and self.Map[new_x][new_y] == 0:
+                    self.Map[x][y] = 0
+                    self.Map[new_x][new_y] = 3
+                    new_positions.append((new_x, new_y))
+                else:
+                    new_positions.append((x, y))
+            self.tank_enemy_sprite_original = self.rotate_enemy_sprite()
+            self.enemy_positions = new_positions
+
+    '''def Draw(self):
         self.game.fill((0, 0, 0))
 
         for x in range(self.MapWidth):
@@ -265,7 +375,7 @@ class MainGame:
                 elif self.Map[x][y] == 3:
                     pygame.draw.rect(self.game, (255, 0, 0), (screen_x, screen_y, self.TileSize, self.TileSize))
 
-        pygame.display.flip()
+        pygame.display.flip()'''
 
     def DrawInConsole(self):
         for row in self.Map:
@@ -298,16 +408,32 @@ class MainGame:
 
         return all((ex, ey) in visited for ex, ey in enemy_positions)
 
-    def Main(self):
-        self.game.fill((0, 0, 0))
-        print(self.DrawInConsole())
+    def shoot(self):
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_shot_time >= 3000:
+            self.last_shot_time = current_time
+            self.bullets.append(Bullet(self.player_x, self.player_y, self.player_dx, self.player_dy))
 
+    def enemy_shoot(self):
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_enemy_shot_time >= 3000:
+            self.last_enemy_shot_time = current_time
+            for x, y in self.enemy_positions:
+                dx = 1 if self.player_x > x else -1 if self.player_x < x else 0
+                dy = 1 if self.player_y > y else -1 if self.player_y < y else 0
+                if dx != 0 or dy != 0:
+                    self.bullets.append(Bullet(x, y, dx, dy))
+
+    def update_bullets(self):
+        for bullet in self.bullets:
+            bullet.move()
+
+    def Main(self):
         running = True
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_w:
                         self.move_player(0, -1)
@@ -317,11 +443,14 @@ class MainGame:
                         self.move_player(-1, 0)
                     elif event.key == pygame.K_d:
                         self.move_player(1, 0)
-
+                    elif event.key == pygame.K_SPACE:
+                        self.shoot()
             self.Draw()
-
+            self.update()
+            self.move_enemies()
+            self.enemy_shoot()
+            self.update_bullets()
         pygame.quit()
-
 
 
 if __name__ == '__main__':
